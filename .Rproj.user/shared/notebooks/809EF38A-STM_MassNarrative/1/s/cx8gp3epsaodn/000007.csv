@@ -1,0 +1,2 @@
+"0","effects <- estimateEffect(1:5 ~ Origins, stmobj = stm_fit, metadata = meta, uncertainty = ""Global"")"
+"0","plot(effects, ""Origins"")"
