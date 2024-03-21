@@ -5,44 +5,65 @@ date: "2024-01-29"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+###Necessary packages
+
+```{r setup, message = FALSE}
 #install.packages("stm")
 library(stm)
 library(tidyverse)
 library(readxl)
 ```
 
-```{r import}
+###Import data
 
+```{r import}
+# Import your data
 data <- read_excel("STM_compare.xlsx")%>%
   filter(is.na(Narratives) != T)
+```
 
+####Preprocessing data
+
+```{r}
 # Preprocess the text data and create a document-term matrix (DTM)
-# This is a simplified example; you might need more complex preprocessing based on your data
-processed <- textProcessor(documents = data$Narratives,stem = T, metadata = data)
-?textProcessor()
+# This is a simplified example; you might need more complex preprocessing based on your data (e.g. lemmatizing).
+processed <- textProcessor(documents = data$Narratives,stem = T, metadata = data)#Use "?textProcessor" to find the possible settings. You can do a lot of preprocessing with this function.
+
+#set up variables
 out <- prepDocuments(processed$documents, processed$vocab, processed$meta)
 docs <- out$documents
 vocab <- out$vocab
 meta <- out$meta
 ```
 
-```{r}
-K <- 5 # Number of topics
-stm_fit <- stm(docs, vocab, K, prevalence = ~ Origins, data = meta, max.em.its = 1000)
-summary(stm_fit)
-```
+#### Search for the optimal number of topics
 
-
-```{r}
+```{r,results='hide'}
 Search_models <- searchK(out$documents, out$vocab, K = c(5, 6, 7, 8, 9), prevalence = ~ Origins, data = meta)
 ```
 
+####plots for best topic numbers
+
 ```{r}
-labelTopics(stm_fit)
+#Visualize outcomes
+plot(Search_models)
+```
+
+#### Create models
+
+```{r,results='hide'}
+K <- 5 # K = Number of topics (the optimal number determined from above)
+stm_fit <- stm(docs, vocab, K, prevalence = ~ Origins, data = meta, max.em.its = 1000)
+```
+
+####Estimate and compare topic prevalence
+
+```{r}
+
+summary(stm_fit) # topic words
 
 # Estimate topic prevalence
-topic_prev <- estimateEffect(1:stm_fit$settings$dim$K ~ Origins, stmobj = stm_fit, metadata = meta)
+topic_prev <- estimateEffect(1:stm_fit$settings$dim$K ~ Origins, stmobj = stm_fit, metadata = meta) # Here we used country of origin as the meta data. 
 
 # Plot the results
 plot.estimateEffect(topic_prev, 
@@ -55,73 +76,43 @@ plot.estimateEffect(topic_prev,
                     width = 25,
                     verbose.labels = F
                     )
-?plot.estimateEffect()
 ```
+
+####Most relevant examples
 
 ```{r}
 #Find the most representative sentence for each topic
 thoughts <- findThoughts(stm_fit, n = 3)
 thoughts$index
 
+# Extract the sentences corresponding to the indices in thoughts$index
+sentences <- sapply(thoughts$index, function(doc_indices) {
+  data$Narratives[doc_indices]
+}) %>% as.data.frame()
+
+# Print the sentences
+print(as.list(sentences))
 ```
 
+###Topic correlations
+
 ```{r}
-data$Narratives[c(251,307,254)]
-data$Narratives[c(598,614,377)]
-data$Narratives[c(568,602,589)]
-data$Narratives[c(519,613,495)]
-data$Narratives[c(560,579,550)]
+# Correlation between topics
+topic_proportions <- stm_fit$theta
+cor_matrix <- cor(topic_proportions)
+
+corrplot::corrplot(cor_matrix, method = "number")
+
 ```
 
+#### Visualization and hypothesis testing.  
 
 ```{r}
+
 effects <- estimateEffect(1:5 ~ Origins, stmobj = stm_fit, metadata = meta, uncertainty = "Global")
 plot(effects, "Origins")
 
-effects_summary <- summary(effects)
-effects_summary
+summary(effects)# Binary country origin predictor (CN vs. US) to predict topic prevalence.
 ```
 
-```{r}
-
-
-# Extract the document-topic probability matrix from the STM model
-topic_probs <- stm_fit$theta
-
-# If the row order of `meta` matches the order of documents in `topic_probs`, proceed
-# Otherwise, you need to ensure they are aligned
-meta$document=c(1:622)
-
-# Convert topic probabilities to a long format dataframe
-topic_probs_df <- as.data.frame(topic_probs) %>%
-  rownames_to_column("document") %>%
-  pivot_longer(-document, names_to = "topic", values_to = "probability")
-
-# Add group information from meta
-# Ensure that `meta` has a row identifier that matches `topic_probs_df$document`
-topic_probs_with_groups <- topic_probs_df %>%
-  mutate(document = as.numeric(document)) %>%
-  left_join(meta, by = "document")
-
-# Calculate average topic probabilities by group and topic
-average_probs_by_group <- topic_probs_with_groups %>%
-  group_by(topic, Origins) %>%
-  summarise(mean_probability = mean(probability), .groups = 'drop')
-
-# Reshape for heatmap
-topic_heatmap_data <- average_probs_by_group %>%
-  pivot_wider(names_from = Origins, values_from = mean_probability)
-
-
-ggplot(average_probs_by_group, aes(x = factor(topic), y = Origins, fill = mean_probability)) +
-  geom_tile(color = "white") + # Adding a white border for clarity
-  scale_fill_viridis_c(option = "plasma", direction = -1) + # Using the Viridis color scale
-  labs(x = "Topic", y = "Group", title = "Average Topic Probability by Group", fill = "Probability") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), # Improve readability of x-axis labels
-        axis.title.y = element_blank()) # Remove the y-axis title for neatness
-
-
-
-```
 
